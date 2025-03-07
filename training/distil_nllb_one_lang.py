@@ -107,8 +107,9 @@ eval_dataset = concatenate_datasets(all_eval_splits)  # contains 'src_text' and 
 # 1.2 Train dataset
 TRAIN_DATASET_IDS = "michal-stefanik/tatoeba_mt_ces-x"
 
+tatoeba_src_lang = drop_locale(src_lang_fl)
 all_splits = get_dataset_config_names(TRAIN_DATASET_IDS)
-src_lang_subsets = [s for s in all_splits if drop_locale(src_lang_fl) in s]
+src_lang_subsets = [s for s in all_splits if tatoeba_src_lang in s]
 
 all_train_datasets = []
 
@@ -116,12 +117,16 @@ for subset in src_lang_subsets:
     split_with_subset = "train" if args.train_firstn is None else "train[:%s]" % args.train_firstn
     try:
         new_tatoeba_dataset = load_dataset(TRAIN_DATASET_IDS, subset, split=split_with_subset)
+        # consistent ordering of languages to allow quick column-wise access:
+        new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: row if row["source_lang"] == tatoeba_src_lang else
+                                                                  {"source_text": row["target_text"],
+                                                                   "target_text": row["source_text"],
+                                                                   "source_lang": row["target_lang"],
+                                                                   "target_lang": row["source_lang"]})
     except ValueError:
         # ValueError: Unknown split "train".
         print("Subset %s does not contain train split; skipping." % subset)
         continue
-
-    # TODO unify the direction of the training data into the same column
 
     all_train_datasets.append(new_tatoeba_dataset)
 
