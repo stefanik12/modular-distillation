@@ -6,24 +6,27 @@ from typing import Optional, List, Type
 
 import torch
 import wandb
-from transformers import PreTrainedModel, AutoModelForSeq2SeqLM, AutoConfig, M2M100ForConditionalGeneration
+from adaptor.lang_module import LangModule
+from transformers import PreTrainedModel, AutoModelForSeq2SeqLM, AutoConfig, M2M100ForConditionalGeneration, \
+    AutoTokenizer
 
+from training.distilled_seq2seq import DistilledSeq2Seq
 from training.langs import flores200_langs, iso639_3_to_iso639_1, drop_locale
 
 torch.manual_seed(4321)
 
 import random
+
 random.seed(4321)
 
 from adaptor.adapter import Adapter
 from adaptor.objectives.seq2seq import Sequence2Sequence
 from adaptor.schedules import ParallelSchedule
 from adaptor.utils import AdaptationArguments, StoppingStrategy
+from adaptor.evaluators.generative import BLEU
 from datasets import load_dataset, concatenate_datasets, Dataset, get_dataset_config_names
 from peft import LoraConfig, TaskType
 from tqdm import tqdm
-
-torch.multiprocessing.set_start_method('spawn')
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--teacher_model", help="A pre-trained model to initialize "
@@ -34,7 +37,7 @@ parser.add_argument("--reset_weights", help="Whether to reset the base model's w
                     type=bool, default=False)
 parser.add_argument("--src_lang", help="Source and target lang for one-to-many and many-to-one distillation")
 parser.add_argument("--tgt_langs", help="Coma-separated list of target languages. E.g: "
-                                           "`sgn,tah`. Defaults to all the NLLB's target languages.", default="")
+                                        "`sgn,tah`. Defaults to all the NLLB's target languages.", default="")
 # parser.add_argument("--pair_evaluation_langs", help="Language pairs on which to perform pair evaluations"
 #                                                     "(GradientDotProduct eval). Format: 'fur,tah;epo,est'", default="")
 parser.add_argument("--eval_batches", default=20, type=int)
@@ -67,7 +70,6 @@ else:
 #
 print("Checkpoint will be saved to '{}'".format(checkpoint_dir))
 
-
 # 1. Initialize data: evaluation (flores for given lang), training (opus for given lang)
 # 1.1 Eval Dataset
 all_eval_splits = []
@@ -96,10 +98,10 @@ for tgt_lang in tgt_langs:
                                split="dev", trust_remote_code=True)
     new_dataset_subset = new_dataset.select(range(args.eval_batches * args.batch_size))
 
-    new_dataset_subset = new_dataset_subset.map(lambda row: {"src_lang": src_lang_fl,
-                                                             "tgt_lang": tgt_lang_fl,
-                                                             "src_text": row["sentence_%s" % src_lang_fl],
-                                                             "tgt_text": row["sentence_%s" % tgt_lang_fl]})
+    new_dataset_subset = new_dataset_subset.map(lambda row: {"source_lang": src_lang_fl,
+                                                             "target_lang": tgt_lang_fl,
+                                                             "source_text": row["sentence_%s" % src_lang_fl],
+                                                             "target_text": row["sentence_%s" % tgt_lang_fl]})
     all_eval_splits.append(new_dataset_subset)
 
 eval_dataset = concatenate_datasets(all_eval_splits)  # contains 'src_text' and 'tgt_text' columns to use for eval
@@ -109,6 +111,8 @@ TRAIN_DATASET_IDS = "michal-stefanik/tatoeba_mt_ces-x"
 
 tatoeba_src_lang = drop_locale(src_lang_fl)
 all_splits = get_dataset_config_names(TRAIN_DATASET_IDS)
+# debug:
+all_splits = ["bre-ces"]
 src_lang_subsets = [s for s in all_splits if tatoeba_src_lang in s]
 
 all_train_datasets = []
@@ -119,10 +123,10 @@ for subset in src_lang_subsets:
         new_tatoeba_dataset = load_dataset(TRAIN_DATASET_IDS, subset, split=split_with_subset)
         # consistent ordering of languages to allow quick column-wise access:
         new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: row if row["source_lang"] == tatoeba_src_lang else
-                                                                  {"source_text": row["target_text"],
-                                                                   "target_text": row["source_text"],
-                                                                   "source_lang": row["target_lang"],
-                                                                   "target_lang": row["source_lang"]})
+        {"source_text": row["target_text"],
+         "target_text": row["source_text"],
+         "source_lang": row["target_lang"],
+         "target_lang": row["source_lang"]})
     except ValueError:
         # ValueError: Unknown split "train".
         print("Subset %s does not contain train split; skipping." % subset)
@@ -135,11 +139,11 @@ print()
 
 
 # 2. Initialize student model: copy the weights of alternate transformer blocks, both encoder and decoder
-def construct_student_from_teacher(teacher_model_id: str,
+def construct_student_from_teacher(teacher_model: PreTrainedModel,
+                                   teacher_model_id: str,
                                    student_model_type: Type[PreTrainedModel],
                                    reset_weights: bool,
-                                   layers_reduction_ratio: int = 4) -> PreTrainedModel:
-    teacher_model = AutoModelForSeq2SeqLM.from_pretrained(teacher_model_id)
+                                   layers_reduction_ratio: int = 12) -> PreTrainedModel:
     teacher_config = AutoConfig.from_pretrained(teacher_model_id)
     student_config = AutoConfig.from_pretrained(teacher_model_id)
     if teacher_config.is_encoder_decoder:
@@ -165,14 +169,69 @@ def construct_student_from_teacher(teacher_model_id: str,
 
     return student_model
 
-
-student_model = construct_student_from_teacher(args.teacher_model,
+teacher_model = AutoModelForSeq2SeqLM.from_pretrained(args.teacher_model)
+student_model = construct_student_from_teacher(teacher_model,
+                                               args.teacher_model,
                                                M2M100ForConditionalGeneration,
                                                args.reset_weights)
+INIT_MODEL_PATH = "init_student_model"
+
+student_model.save_pretrained(INIT_MODEL_PATH)
+AutoTokenizer.from_pretrained(args.teacher_model).save_pretrained(INIT_MODEL_PATH)
 
 # 3. Initialize two objectives: 1. forward with data: {lang}-{others}, 2. backward with data: {others}-{lang}
 #   the data can be constructed in advance by concatenating all relevant subsets of HF Opus-100 dataset
+lang_module = LangModule(INIT_MODEL_PATH)
+evaluators = [BLEU()]
 
+fwd_objective = DistilledSeq2Seq(lang_module,
+                                 teacher_model=teacher_model,
+                                 batch_size=args.batch_size,
+                                 val_evaluators=evaluators,
+
+                                 texts_or_path=train_dataset["source_text"],
+                                 texts_langs=train_dataset["source_lang"],
+                                 labels_or_path=train_dataset["target_text"],
+                                 labels_langs=train_dataset["target_lang"],
+
+                                 val_texts_or_path=eval_dataset["source_text"],
+                                 val_texts_langs=eval_dataset["source_lang"],
+                                 val_labels_or_path=eval_dataset["target_text"],
+                                 val_labels_langs=eval_dataset["target_lang"],
+                                 # source_lang_id="en", target_lang_id="cs"
+                                 )
+bwd_objective = DistilledSeq2Seq(lang_module,
+                                 teacher_model=teacher_model,
+                                 batch_size=args.batch_size,
+                                 val_evaluators=evaluators,
+
+                                 texts_or_path=train_dataset["target_textsource_text"],
+                                 texts_langs=train_dataset["target_lang"],
+                                 labels_or_path=train_dataset["source_text"],
+                                 labels_langs=train_dataset["source_lang"],
+
+                                 val_texts_or_path=eval_dataset["target_text"],
+                                 val_texts_langs=eval_dataset["target_lang"],
+                                 val_labels_or_path=eval_dataset["source_text"],
+                                 val_labels_langs=eval_dataset["source_lang"],
+                                 # source_lang_id="en", target_lang_id="cs"
+                                 )
+train_objectives = [fwd_objective, bwd_objective]
+
+training_arguments = AdaptationArguments(output_dir="ner_training_checkpoints",
+                                         stopping_strategy=StoppingStrategy.FIRST_OBJECTIVE_CONVERGED,
+                                         do_train=True,
+                                         do_eval=True,
+                                         gradient_accumulation_steps=4,
+                                         evaluation_strategy="steps",
+                                         # log_level="critical",
+                                         logging_steps=200,
+                                         eval_steps=500,
+                                         num_train_epochs=10,
+                                         save_steps=1000)
+
+schedule = ParallelSchedule(train_objectives, training_arguments)
+adapter = Adapter(lang_module, schedule, training_arguments)
+adapter.train()
 
 # 4. Consider whether to weigh the distil loss with the standard seq2seq
-
