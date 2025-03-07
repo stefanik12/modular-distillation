@@ -44,6 +44,7 @@ def read_rows(dir: str, split: str) -> Tuple[List[str], List[str]]:
 
 
 for subdir in tqdm(lang_subdirs, desc="Uploading langs"):
+    logger.warning("Processing lang subdir %s", subdir)
     # if TARGET_LANG is not None and TARGET_LANG not in subdir:
     #     logger.warning("Skipping lang pair %s", subdir)
     #     continue
