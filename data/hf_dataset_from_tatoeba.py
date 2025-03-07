@@ -3,6 +3,7 @@ import os
 from typing import List, Tuple, Union
 
 from datasets import DatasetDict, Dataset
+from tqdm import tqdm
 
 logger = logging.getLogger()
 
@@ -15,6 +16,12 @@ subdirs = os.listdir(TATOEBA_DATA_DIR)
 
 lang_subdirs = [sdir for sdir in subdirs if len(sdir.split("-")) == 2
                 and len(sdir.split("-")[0]) <= 3 and len(sdir.split("-")[1]) <= 3]
+
+logger.warning("Directory %s contains %s lang pairs", TATOEBA_DATA_DIR, len(lang_subdirs))
+
+if TARGET_LANG is not None:
+    lang_subdirs = [l for l in lang_subdirs if TARGET_LANG in l]
+    logger.warning("Subsetting to %s lang pairs containing %s", len(lang_subdirs), TARGET_LANG)
 
 
 def read_rows(dir: str, split: str) -> Tuple[List[str], List[str]]:
@@ -36,10 +43,10 @@ def read_rows(dir: str, split: str) -> Tuple[List[str], List[str]]:
         return [], []
 
 
-for subdir in lang_subdirs:
-    if TARGET_LANG is not None and TARGET_LANG not in subdir:
-        logger.warning("Skipping lang pair %s", subdir)
-        continue
+for subdir in tqdm(lang_subdirs, desc="Uploading langs"):
+    # if TARGET_LANG is not None and TARGET_LANG not in subdir:
+    #     logger.warning("Skipping lang pair %s", subdir)
+    #     continue
 
     subdir_path = os.path.join(TATOEBA_DATA_DIR, subdir)
     lang_pair_dataset = DatasetDict()
