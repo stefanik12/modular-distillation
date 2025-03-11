@@ -3,16 +3,25 @@ import os
 from functools import partial
 from typing import List, Tuple, Union, Iterator, Dict
 
-from datasets import DatasetDict, Dataset, IterableDataset, Value, Features
+from datasets import DatasetDict, Dataset, Value, Features
 from tqdm import tqdm
 
 logger = logging.getLogger()
 
-TATOEBA_DATA_DIR = 'data/example_data_dir'
-TARGET_HF_PATH = "michal-stefanik/toy_tatoeba_dataset"
+# local:
+# TATOEBA_DATA_DIR = 'data/example_data_dir'
+# TARGET_HF_PATH = "michal-stefanik/toy_tatoeba_dataset"
+#
+# TARGET_LANG: Union[str, None] = None
+# SOURCE_LANGS: Union[str, None] = None
 
-TARGET_LANG: Union[str, None] = None
-SOURCE_LANGS: Union[str, None] = None
+# lumi:
+TATOEBA_DATA_DIR = '/scratch/project_462000447/data/Tatoeba-Challenge/v2023-09-26'
+TARGET_HF_PATH = "michal-stefanik/tatoeba_mt_ces-x"
+
+TARGET_LANG: Union[str, None] = "ces"
+SOURCE_LANGS: Union[str, None] = "eng"
+
 
 subdirs = os.listdir(TATOEBA_DATA_DIR)
 
@@ -76,7 +85,7 @@ def generate_entries(dir: str, split: str) -> Union[None, Iterator[Dict[str, str
                            "target_lang": subdir.split("-")[1]}
     else:
         logger.warning("Path %s not found, skipping", path)
-        return {}
+        return False
 
 
 for subdir in tqdm(lang_subdirs, desc="Uploading langs"):
@@ -87,18 +96,20 @@ for subdir in tqdm(lang_subdirs, desc="Uploading langs"):
     for split in ["train", "val", "dev", "test"]:
         if split == "dev":
             split = "val"
-        # src, trg = read_rows(subdir_path, split)
-        # if src and trg:
-        #     lang_pair_dataset[split] = Dataset.from_dict({"source_text": src, "target_text": trg,
-        #                                                   "source_lang": [subdir.split("-")[0]]*len(src),
-        #                                                   "target_lang": [subdir.split("-")[1]]*len(trg)
-        #                                                   })
+
         data_generator = generate_entries(subdir_path, split)
-        # if data_generator is not None:
-        # TODO: {TypeError}TypeError("cannot pickle 'generator' object")
-        #  https://huggingface.co/docs/datasets/en/create_dataset#from-python-dictionaries
+        if not data_generator:
+            # No files found for the current split
+            continue
+        try:
+            next(data_generator)
+        except StopIteration:
+            # some of the iterated documents are empty
+            continue
+
+        # explicit schema definition
         features = Features({"source_text": Value("string"), "target_text": Value("string"),
-                    "source_lang": Value("string"), "target_lang": Value("string")})
+                             "source_lang": Value("string"), "target_lang": Value("string")})
         lang_pair_dataset[split] = Dataset.from_generator(partial(generate_entries, dir=subdir_path, split=split), features=features)
 
     logger.warning("Pushing subset %s with splits %s into %s", subdir, lang_pair_dataset.keys(), TARGET_HF_PATH)
