@@ -1,3 +1,5 @@
+from typing import Optional, List, Tuple
+
 nllb_eng_src_in_tatoeba = ['epo', 'est', 'eus', 'ewe', 'fao', 'fij', 'fin',
                            'fon', 'fra', 'fur', 'gla', 'gle', 'glg', 'grn', 'guj',
                            'hat', 'hau', 'heb', 'hin', 'hne', 'hun', 'hye', 'ibo',
@@ -123,3 +125,15 @@ def drop_locale(iso639_3_code: str) -> str:
     assert "_" in iso639_3_code, "Given lang does not seem to have a locale assigned"
     return iso639_3_code.split("_")[0]
 
+
+def get_intersecting_target_langs(tatoeba_target_langs: List[str]) -> Tuple[List[str], List[str]]:
+    flores_without_locales = [l.split("_")[0] for l in flores200_langs]
+    non_ambig_flores_langs = set([l for l in flores200_langs if flores_without_locales.count(l.split("_")[0]) == 1])
+    # print all omitted languages:
+    non_ambig_flores_without_locales = set(l.split("_")[0] for l in flores200_langs)
+
+    matching_tatoeba_langs = [l for l in tatoeba_target_langs if l in non_ambig_flores_without_locales]
+    covered_flores_langs = [l for l in non_ambig_flores_langs if any(l.startswith(tatoeba_l)
+                                                                     for tatoeba_l in matching_tatoeba_langs)]
+    # TODO: resolve mismatching number of langs in a full collection (37 vs 38 langs)
+    return covered_flores_langs, matching_tatoeba_langs

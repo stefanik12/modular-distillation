@@ -10,7 +10,7 @@ from transformers import PreTrainedModel, AutoModelForSeq2SeqLM, AutoConfig, M2M
 
 import wandb
 from training.distilled_seq2seq import DistilledNLLB
-from training.langs import flores200_langs, drop_locale
+from training.langs import flores200_langs, drop_locale, get_intersecting_target_langs
 import random
 
 torch.manual_seed(4321)
@@ -53,7 +53,7 @@ print("Training World size: %s" % int(os.environ.get("WORLD_SIZE", 1)))
 
 wandb.init(project="modular-distillation")
 wandb.log({"slurm_id": os.environ.get("SLURM_JOB_ID", -1)}, commit=False)
-#
+
 if args.resume_from_checkpoint:
     # remove the checkpoint-X part of path
     checkpoint_dir = args.checkpoint_dir.split("/checkpoint-")[0]
@@ -66,28 +66,36 @@ else:
 print("Checkpoint will be saved to '{}'".format(checkpoint_dir))
 
 # 1. Initialize data: evaluation (flores for given lang), training (opus for given lang)
-# 1.1 Eval Dataset
+# Languages resolution
+
 all_eval_splits = []
 
 src_lang_fl = [lang for lang in flores200_langs if lang.startswith(args.src_lang)]
 assert len(src_lang_fl) == 1, "Ambiguous src lang resolution for %s" % args.src_lang
 src_lang_fl = src_lang_fl[0]
 
-tgt_langs_fl = []
+src_lang_tatoeba = drop_locale(src_lang_fl)
 
-tgt_langs = args.tgt_langs.split(",") if args.tgt_langs else flores200_langs
+TRAIN_DATASET_ID = "michal-stefanik/tatoeba_mt_ces-x"
+all_tatoeba_splits = get_dataset_config_names(TRAIN_DATASET_ID)
+srclang_tatoeba_splits = [split for split in all_tatoeba_splits if src_lang_tatoeba in split]
 
-for tgt_lang in tgt_langs:
-    # resolution of tgt language in arbitrary encoding
-    tgt_lang_fl = [lang for lang in flores200_langs if lang.startswith(tgt_lang)]
-    assert len(tgt_lang_fl) == 1, "Ambiguous tgt lang resolution for %s" % tgt_lang_fl
-    tgt_lang_fl = tgt_lang_fl[0]
+tgt_langs_tatoeba = [split.replace(src_lang_tatoeba, "").replace("-", "") for split in srclang_tatoeba_splits]
 
-    assert tgt_lang_fl in flores200_langs
+tgt_langs_initial = [l.split("_")[0] for l in args.tgt_langs.split(",")] if args.tgt_langs else tgt_langs_tatoeba
 
+assert all(any(lang in split for split in all_tatoeba_splits) for lang in tgt_langs_initial), \
+    "Tatoeba does not have data for some of the given target langs. Available splits: %s" % srclang_tatoeba_splits
+
+tgt_langs_fl, tgt_langs_tatoeba = get_intersecting_target_langs(tatoeba_target_langs=tgt_langs_initial)
+
+# 1.1 FLORES eval data resolution
+for tgt_lang_fl in tgt_langs_fl:
     if src_lang_fl == tgt_lang_fl:
+        # skip the training for the identical language
         continue
-    tgt_langs_fl.append(tgt_lang_fl)
+
+    # tgt_langs_fl.append(tgt_lang_fl)
 
     new_dataset = load_dataset("Muennighoff/flores200", "%s-%s" % (src_lang_fl, tgt_lang_fl),
                                split="dev", trust_remote_code=True)
@@ -101,42 +109,38 @@ for tgt_lang in tgt_langs:
 
 eval_dataset = concatenate_datasets(all_eval_splits)  # contains 'src_text' and 'tgt_text' columns to use for eval
 
-# 1.2 Train dataset
-TRAIN_DATASET_IDS = "michal-stefanik/tatoeba_mt_ces-x"
+# 1.2 Tatoeba Training dataset resolution
 
-tatoeba_src_lang = drop_locale(src_lang_fl)
-all_splits = get_dataset_config_names(TRAIN_DATASET_IDS)
 # debug:
 # all_splits = ["bre-ces"]
-src_lang_subsets = [s for s in all_splits if tatoeba_src_lang in s]
-# TODO: we need to figure out the picking of training target langs -- should they match flores or not?
-# if args.tgt_langs:
-#     src_lang_subsets = [s for s in all_splits if any(tgt_lang in s for tgt_lang in args.tgt_langs.split(","))]
+src_lang_subsets = [s for s in all_tatoeba_splits if src_lang_tatoeba in s]
 
 all_train_datasets = []
 
-for subset in src_lang_subsets:
+src_tgtlang_tatoeba_splits = [s for s in srclang_tatoeba_splits if any(tgt_l in s for tgt_l in tgt_langs_tatoeba)]
+for subset in src_tgtlang_tatoeba_splits:
     split_with_subset = "train" if not args.train_firstn else "train[:%s]" % args.train_firstn
     try:
-        new_tatoeba_dataset = load_dataset(TRAIN_DATASET_IDS, subset, split=split_with_subset)
-        # consistent ordering of languages to allow quick column-wise access:
-        new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: row if row["source_lang"] == tatoeba_src_lang else
-        {"source_text": row["target_text"],
-         "target_text": row["source_text"],
-         "source_lang": row["target_lang"],
-         "target_lang": row["source_lang"]})
-        # NLLB-specific adjustment: lang codes match the Flores collection
-        # assuming that the whole dataset subset contains consistent lang pair
-        tgt_lang_fl = [lang for lang in flores200_langs if lang.startswith(new_tatoeba_dataset["target_lang"][0])]
-        assert len(tgt_lang_fl) == 1, "Ambiguous tgt lang resolution for %s" % tgt_lang_fl
-        tgt_lang_fl = tgt_lang_fl[0]
-
-        new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {"source_lang": src_lang_fl,
-                                                                   "target_lang": tgt_lang_fl})
+        new_tatoeba_dataset = load_dataset(TRAIN_DATASET_ID, subset, split=split_with_subset)
     except ValueError:
         # ValueError: Unknown split "train".
         print("Subset %s does not contain train split; skipping." % subset)
         continue
+
+    # consistent ordering of languages to allow quick column-wise access:
+    new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: row if row["source_lang"] == src_lang_tatoeba else
+    {"source_text": row["target_text"],
+     "target_text": row["source_text"],
+     "source_lang": row["target_lang"],
+     "target_lang": row["source_lang"]})
+    # NLLB-specific adjustment: lang codes match the Flores collection
+    # assuming that the whole dataset subset contains consistent lang pair
+    tgt_lang_fl = [lang for lang in flores200_langs if lang.startswith(new_tatoeba_dataset["target_lang"][0])]
+    assert len(tgt_lang_fl) == 1, "Ambiguous tgt lang resolution for %s" % tgt_lang_fl
+    tgt_lang_fl = tgt_lang_fl[0]
+
+    new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {"source_lang": src_lang_fl,
+                                                               "target_lang": tgt_lang_fl})
 
     all_train_datasets.append(new_tatoeba_dataset)
 
@@ -233,13 +237,13 @@ training_arguments = AdaptationArguments(output_dir=args.checkpoint_dir,
                                          stopping_strategy=StoppingStrategy.FIRST_OBJECTIVE_CONVERGED,
                                          do_train=True,
                                          do_eval=True,
-                                         gradient_accumulation_steps=4,
+                                         gradient_accumulation_steps=8,
                                          evaluation_strategy="steps",
                                          # log_level="critical",
                                          logging_steps=200,
-                                         eval_steps=500,
+                                         eval_steps=args.eval_steps,
                                          num_train_epochs=10,
-                                         save_steps=1000,
+                                         save_steps=args.save_steps,
                                          no_cuda=True if args.train_firstn < 10e4 else False,
                                          )
 
