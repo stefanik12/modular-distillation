@@ -1,3 +1,4 @@
+#!/bin/bash
 #SBATCH --job-name=distil_nllb
 #SBATCH --account=project_462000764
 #SBATCH --time=01:00:00
