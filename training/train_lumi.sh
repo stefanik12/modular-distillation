@@ -1,7 +1,7 @@
-#SBATCH --job-name=train_loras_nllb_langs
+#SBATCH --job-name=distil_nllb
 #SBATCH --account=project_462000764
-#SBATCH --time=00:01:00
-#SBATCH --mem-per-cpu=2G
+#SBATCH --time=01:00:00
+#SBATCH --mem-per-cpu=64G
 #SBATCH --partition=small-g
 ##SBATCH --mail-type=BEGIN #uncomment to enable mail
 #SBATCH --gpus-per-node=1
