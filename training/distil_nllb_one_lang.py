@@ -37,6 +37,7 @@ parser.add_argument("--tgt_langs", help="Coma-separated list of target languages
 parser.add_argument("--eval_batches", default=20, type=int)
 parser.add_argument("--eval_steps", default=500, type=int)
 parser.add_argument("--batch_size", default=2, type=int)
+parser.add_argument("--effective_batch_size", default=32, type=int)
 parser.add_argument("--train_firstn", default=0, type=int)
 parser.add_argument("--save_steps", default=500, type=int)
 parser.add_argument("--layers_reduction_ratio", default=12, type=int)
@@ -48,11 +49,12 @@ args = parser.parse_args()
 args.resume_from_checkpoint = args.resume_from_checkpoint.lower() != "false"
 # args.eval_run = args.eval_run.lower() != "false"
 
-print("Running with arguments: %s" % args)
-print("Training World size: %s" % int(os.environ.get("WORLD_SIZE", 1)))
-
 wandb.init(project="modular-distillation")
 wandb.log({"slurm_id": os.environ.get("SLURM_JOB_ID", -1)}, commit=False)
+
+print("Running with arguments: %s" % args)
+print("Training World size: %s" % int(os.environ.get("WORLD_SIZE", 1)))
+print("CUDA.is_available(): %s" % torch.cuda.is_available())
 
 if args.resume_from_checkpoint:
     # remove the checkpoint-X part of path
@@ -237,14 +239,14 @@ training_arguments = AdaptationArguments(output_dir=args.checkpoint_dir,
                                          stopping_strategy=StoppingStrategy.FIRST_OBJECTIVE_CONVERGED,
                                          do_train=True,
                                          do_eval=True,
-                                         gradient_accumulation_steps=8,
+                                         gradient_accumulation_steps=args.effective_batch_size // args.batch_size,
                                          evaluation_strategy="steps",
                                          # log_level="critical",
                                          logging_steps=200,
                                          eval_steps=args.eval_steps,
                                          num_train_epochs=10,
                                          save_steps=args.save_steps,
-                                         no_cuda=True if args.train_firstn < 10e4 else False,
+                                         no_cuda=True if (args.train_firstn and args.train_firstn < 10e4) else False,
                                          )
 
 schedule = ParallelSchedule(train_objectives, training_arguments)

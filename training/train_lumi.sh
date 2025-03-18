@@ -1,4 +1,6 @@
 #!/bin/bash
+## run this eg with:
+## sbatch training/train_lumi.sh --teacher_model facebook/nllb-200-distilled-600M --src_lang ces --tgt_langs epo,kab --batch_size 2 --eval_steps 1000
 #SBATCH --job-name=distil_nllb
 #SBATCH --account=project_462000764
 #SBATCH --time=01:00:00
@@ -26,10 +28,8 @@ fi
 unset __conda_setup
 conda activate soft-clm
 
-export DATA_DIR=/scratch/project_2001194/tiedeman/Tatoeba-Challenge/data/release/v2023-09-26
-
 export MY_PROJECT_HOME=/scratch/project_462000764/mstefani/modular-distillation/
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+export HF_HOME=/scratch/project_462000764/mstefani/hf_home
 
-srun python training/distil_nllb_one_lang.py --base_data_dir ${DATA_DIR} --checkpoint_dir ${MY_PROJECT_HOME} "$@"
-
-
+srun python3.10 training/distil_nllb_one_lang.py --checkpoint_dir ${MY_PROJECT_HOME} "$@"
