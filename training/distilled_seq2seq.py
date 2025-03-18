@@ -7,7 +7,7 @@ from adaptor.objectives.seq2seq import Sequence2Sequence, SequentialMixin
 from transformers import BatchEncoding
 
 
-class DistilledSeq2Seq(Sequence2Sequence, Distillation):
+class DistilledSeq2Seq(Distillation, Sequence2Sequence):
     pass
 
 
@@ -80,10 +80,10 @@ class DistilledNLLB(DistilledSeq2Seq):
                                        preloaded_module: Optional[torch.nn.Module] = None,
                                        merge_objective_module: bool = True) -> torch.nn.Module:
 
-        head_module = super(SequentialMixin, self).register_compatible_head_model(lang_module,
-                                                                                  other_objective,
-                                                                                  objective_args_for_head_config,
-                                                                                  preloaded_module,
-                                                                                  merge_objective_module)
+        head_module = super(DistilledSeq2Seq, self).register_compatible_head_model(lang_module,
+                                                                                   other_objective,
+                                                                                   objective_args_for_head_config,
+                                                                                   preloaded_module,
+                                                                                   merge_objective_module)
         return head_module
 
