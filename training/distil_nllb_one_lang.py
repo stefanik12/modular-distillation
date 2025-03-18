@@ -49,6 +49,8 @@ parser.add_argument("--learning_rate", help="Learning rate used with all objecti
                     default=2e-5, type=float)
 args = parser.parse_args()
 args.resume_from_checkpoint = args.resume_from_checkpoint.lower() != "false"
+args.add_hidden_states_loss = args.add_hidden_states_loss.lower() != "false"
+args.restrict_loss_to_mask = args.restrict_loss_to_mask.lower() != "false"
 # args.eval_run = args.eval_run.lower() != "false"
 
 wandb.init(project="modular-distillation")
