@@ -60,8 +60,11 @@ class DistilledNLLB(DistilledSeq2Seq):
             self.tokenizer.src_lang = source_lang
             # self.tokenizer.tgt_lang = target_lang
             sample_features = self.tokenizer(source_text, truncation=True)
-
-            self.tokenizer.src_lang = target_lang
+            try:
+                self.tokenizer.src_lang = target_lang
+            except TypeError as e:
+                print("Error setting src_lang to %s" % target_lang)
+                raise e
             sample_targets = self.tokenizer(target_text, truncation=True)
 
             features_batch.append({"input_ids": sample_features.input_ids,
