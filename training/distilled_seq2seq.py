@@ -15,10 +15,10 @@ class DistilledNLLB(DistilledSeq2Seq):
 
     def __init__(self,
                  *args,
-                 texts_langs: List[str],
-                 labels_langs: List[str],
-                 val_texts_langs: List[str],
-                 val_labels_langs: List[str],
+                 texts_langs: Iterable[str],
+                 labels_langs: Iterable[str],
+                 val_texts_langs: Iterable[str],
+                 val_labels_langs: Iterable[str],
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.texts_langs = texts_langs

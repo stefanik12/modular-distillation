@@ -1,7 +1,8 @@
 import argparse
+import itertools
 import os
 from copy import deepcopy
-from typing import Type
+from typing import Type, Tuple, Iterator, List
 
 import torch
 from adaptor.lang_module import LangModule
@@ -20,7 +21,7 @@ from adaptor.adapter import Adapter
 from adaptor.schedules import ParallelSchedule
 from adaptor.utils import AdaptationArguments, StoppingStrategy
 from adaptor.evaluators.generative import BLEU
-from datasets import load_dataset, concatenate_datasets, get_dataset_config_names
+from datasets import load_dataset, concatenate_datasets, get_dataset_config_names, IterableDataset
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--teacher_model", help="A pre-trained model to initialize "
@@ -42,7 +43,7 @@ parser.add_argument("--batch_size", default=2, type=int)
 parser.add_argument("--effective_batch_size", default=32, type=int)
 parser.add_argument("--train_firstn", default=0, type=int)
 parser.add_argument("--save_steps", default=500, type=int)
-parser.add_argument("--layers_reduction_ratio", default=12, type=int)
+parser.add_argument("--layers_reduction_ratio", default=12, type=int)  # TODO: check this in Distillation
 parser.add_argument("--resume_from_checkpoint", help="Whether this is a continued training."
                                                      "Defaults to False", default="False", type=str)
 parser.add_argument("--learning_rate", help="Learning rate used with all objectives. Defaults to `2e-5`.",
@@ -122,12 +123,14 @@ eval_dataset = concatenate_datasets(all_eval_splits)  # contains 'src_text' and 
 src_lang_subsets = [s for s in all_tatoeba_splits if src_lang_tatoeba in s]
 
 all_train_datasets = []
+train_dataset_length = 0
 
 src_tgtlang_tatoeba_splits = [s for s in srclang_tatoeba_splits if any(tgt_l in s for tgt_l in tgt_langs_tatoeba)]
 for subset in src_tgtlang_tatoeba_splits:
-    split_with_subset = "train" if not args.train_firstn else "train[:%s]" % args.train_firstn
+    # split_with_subset = "train" if not args.train_firstn else "train[:%s]" % args.train_firstn
+    split_with_subset = "train"
     try:
-        new_tatoeba_dataset = load_dataset(TRAIN_DATASET_ID, subset, split=split_with_subset)
+        new_tatoeba_dataset = load_dataset(TRAIN_DATASET_ID, subset, split=split_with_subset, streaming=True)
     except ValueError:
         # ValueError: Unknown split "train".
         print("Subset %s does not contain train split; skipping." % subset)
@@ -141,17 +144,41 @@ for subset in src_tgtlang_tatoeba_splits:
      "target_lang": row["source_lang"]})
     # NLLB-specific adjustment: lang codes match the Flores collection
     # assuming that the whole dataset subset contains consistent lang pair
-    tgt_lang_fl = [lang for lang in flores200_langs if lang.startswith(new_tatoeba_dataset["target_lang"][0])]
+    tgt_lang_tatoeba = subset.replace(src_lang_tatoeba, "").replace("-", "")
+    tgt_lang_fl = [lang for lang in flores200_langs if lang.startswith(tgt_lang_tatoeba)]
     assert len(tgt_lang_fl) == 1, "Ambiguous tgt lang resolution for %s" % tgt_lang_fl
     tgt_lang_fl = tgt_lang_fl[0]
 
     new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {"source_lang": src_lang_fl,
                                                                "target_lang": tgt_lang_fl})
 
+    train_dataset_length += new_tatoeba_dataset._info.splits["train"].num_examples
     all_train_datasets.append(new_tatoeba_dataset)
 
-train_dataset = concatenate_datasets(all_train_datasets)  # same format as eval data
-print()
+train_dataset_fwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=1000)
+train_dataset_bwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=1000)
+
+
+def col_iterator_from_dataset(dataset: IterableDataset, column: str) -> Iterator[str]:
+    dataset_iter = iter(dataset)
+    for sample in dataset_iter:
+        yield sample[column]
+
+
+def all_iterators_from_dataset(dataset: IterableDataset, keys: List[str]) -> List[Iterator[str]]:
+    forked_datasets = itertools.tee(dataset, len(keys))
+    return [col_iterator_from_dataset(forked_datasets[i], k) for i, k in enumerate(keys)]
+
+
+iters_keys = ["source_text", "target_text", "source_lang", "target_lang"]
+
+train_iters = {
+    "fwd": dict(zip(iters_keys, all_iterators_from_dataset(train_dataset_fwd, iters_keys))),
+    "bwd": dict(zip(iters_keys, all_iterators_from_dataset(train_dataset_bwd, iters_keys)))
+}
+
+# train_src_iter_fwd, train_tgt_iter_fwd, train_tgt_lang_iter_fwd = all_iterators_from_dataset(train_dataset_fwd)
+# train_src_iter_bwd, train_tgt_iter_bwd, train_src_lang_iter_bwd = all_iterators_from_dataset(train_dataset_bwd)
 
 
 # 2. Initialize student model: copy the weights of alternate transformer blocks, both encoder and decoder
@@ -210,10 +237,11 @@ fwd_objective = DistilledNLLB(lang_module=lang_module,
                               add_hidden_states_loss=args.add_hidden_states_loss,
                               restrict_loss_to_mask=args.restrict_loss_to_mask,
 
-                              texts_or_path=train_dataset["source_text"],
-                              texts_langs=train_dataset["source_lang"],
-                              labels_or_path=train_dataset["target_text"],
-                              labels_langs=train_dataset["target_lang"],
+                              texts_or_path=train_iters["fwd"]["source_text"],
+                              texts_langs=train_iters["fwd"]["source_lang"],
+                              labels_or_path=train_iters["fwd"]["target_text"],
+                              labels_langs=train_iters["fwd"]["target_lang"],
+                              train_dataset_length=train_dataset_length,
 
                               val_texts_or_path=eval_dataset["source_text"],
                               val_texts_langs=eval_dataset["source_lang"],
@@ -229,10 +257,11 @@ bwd_objective = DistilledNLLB(lang_module,
                               add_hidden_states_loss=args.add_hidden_states_loss,
                               restrict_loss_to_mask=args.restrict_loss_to_mask,
 
-                              texts_or_path=train_dataset["target_text"],
-                              texts_langs=train_dataset["target_lang"],
-                              labels_or_path=train_dataset["source_text"],
-                              labels_langs=train_dataset["source_lang"],
+                              texts_or_path=train_iters["fwd"]["source_text"],
+                              texts_langs=train_iters["fwd"]["source_lang"],
+                              labels_or_path=train_iters["fwd"]["target_text"],
+                              labels_langs=train_iters["fwd"]["target_lang"],
+                              train_dataset_length=train_dataset_length,
 
                               val_texts_or_path=eval_dataset["target_text"],
                               val_texts_langs=eval_dataset["target_lang"],
