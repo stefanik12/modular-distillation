@@ -124,6 +124,7 @@ src_lang_subsets = [s for s in all_tatoeba_splits if src_lang_tatoeba in s]
 
 all_train_datasets = []
 train_dataset_length = 0
+target_langs = []
 
 src_tgtlang_tatoeba_splits = [s for s in srclang_tatoeba_splits if any(tgt_l in s for tgt_l in tgt_langs_tatoeba)]
 for subset in src_tgtlang_tatoeba_splits:
@@ -163,6 +164,9 @@ for subset in src_tgtlang_tatoeba_splits:
 
     train_dataset_length += new_tatoeba_dataset._info.splits["train"].num_examples
     all_train_datasets.append(new_tatoeba_dataset)
+    target_langs.append(tgt_lang_fl)
+
+print("Target training langs: %s" % target_langs)
 
 train_dataset_fwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=1000)
 train_dataset_bwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=1000)
@@ -280,6 +284,10 @@ bwd_objective = DistilledNLLB(lang_module,
                               objective_id="X->%s" % args.src_lang
                               )
 train_objectives = [fwd_objective, bwd_objective]
+
+missing_langs = set(target_langs) - set(fwd_objective.tokenizer.additional_special_tokens)
+if missing_langs:
+    raise ValueError("These langs are missing from the model vocab: %s" % missing_langs)
 
 training_arguments = AdaptationArguments(output_dir=args.checkpoint_dir,
                                          stopping_strategy=StoppingStrategy.FIRST_OBJECTIVE_CONVERGED,
