@@ -58,11 +58,12 @@ class DistilledNLLB(DistilledSeq2Seq):
                                                                       source_langs, target_langs):
             # TODO: this should be fine, but let's check the encoded inputs
             self.tokenizer.src_lang = source_lang
-            self.tokenizer.tgt_lang = target_lang
+            # self.tokenizer.tgt_lang = target_lang
             sample_features = self.tokenizer(source_text, truncation=True)
 
-            with self.tokenizer.as_target_tokenizer():
-                sample_targets = self.tokenizer(target_text, truncation=True)
+            self.tokenizer.src_lang = target_lang
+            sample_targets = self.tokenizer(target_text, truncation=True)
+
             features_batch.append({"input_ids": sample_features.input_ids,
                                    "attention_mask": sample_features.attention_mask,
                                    "labels": sample_targets.input_ids})
