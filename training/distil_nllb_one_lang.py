@@ -146,7 +146,16 @@ for subset in src_tgtlang_tatoeba_splits:
     # assuming that the whole dataset subset contains consistent lang pair
     tgt_lang_tatoeba = subset.replace(src_lang_tatoeba, "").replace("-", "")
     tgt_lang_fl = [lang for lang in flores200_langs if lang.startswith(tgt_lang_tatoeba)]
-    assert len(tgt_lang_fl) == 1, "Ambiguous tgt lang resolution for %s" % tgt_lang_fl
+    if not len(tgt_lang_fl) == 1:
+        print("Ambiguous tgt lang resolution for %s. Skipping and dropping %s from eval datasets."
+              % (tgt_lang_tatoeba, tgt_lang_fl))
+        eval_dataset = eval_dataset.filter(lambda row: not (tgt_lang_fl in row["source_lang"]
+                                                            or tgt_lang_fl in row["target_lang"]))
+        continue
+    elif len(tgt_lang_fl) < 1:
+        print("No matching source lang found for %s. Skipping." % tgt_lang_tatoeba)
+        continue
+
     tgt_lang_fl = tgt_lang_fl[0]
 
     new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {"source_lang": src_lang_fl,
