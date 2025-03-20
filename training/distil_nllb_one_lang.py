@@ -149,8 +149,8 @@ for subset in src_tgtlang_tatoeba_splits:
     if not len(tgt_lang_fl) == 1:
         print("Ambiguous tgt lang resolution for %s. Skipping and dropping %s from eval datasets."
               % (tgt_lang_tatoeba, tgt_lang_fl))
-        eval_dataset = eval_dataset.filter(lambda row: not (tgt_lang_fl in row["source_lang"]
-                                                            or tgt_lang_fl in row["target_lang"]))
+        eval_dataset = eval_dataset.filter(lambda row: not (any(l_fl in row["source_lang"] for l_fl in tgt_lang_fl)
+                                                            or any(l_fl in row["target_lang"] for l_fl in tgt_lang_fl)))
         continue
     elif len(tgt_lang_fl) < 1:
         print("No matching source lang found for %s. Skipping." % tgt_lang_tatoeba)
