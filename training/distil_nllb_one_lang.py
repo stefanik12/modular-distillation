@@ -258,14 +258,11 @@ fwd_objective = DistilledNLLB(lang_module=lang_module,
                               labels_langs=train_iters["fwd"]["target_lang"],
                               train_dataset_length=train_dataset_length,
 
-                              # val_texts_or_path=eval_dataset["source_text"],
-                              # val_texts_langs=eval_dataset["source_lang"],
-                              # val_labels_or_path=eval_dataset["target_text"],
-                              # val_labels_langs=eval_dataset["target_lang"],
-                              val_texts_or_path=[],
-                              val_texts_langs=[],
-                              val_labels_or_path=[],
-                              val_labels_langs=[],
+                              val_texts_or_path=eval_dataset["source_text"],
+                              val_texts_langs=eval_dataset["source_lang"],
+                              val_labels_or_path=eval_dataset["target_text"],
+                              val_labels_langs=eval_dataset["target_lang"],
+
                               # source_lang_id="en", target_lang_id="cs"
                               objective_id="%s->X" % args.src_lang
                               )
@@ -282,14 +279,11 @@ bwd_objective = DistilledNLLB(lang_module,
                               labels_langs=train_iters["fwd"]["target_lang"],
                               train_dataset_length=train_dataset_length,
 
-                              # val_texts_or_path=eval_dataset["target_text"],
-                              # val_texts_langs=eval_dataset["target_lang"],
-                              # val_labels_or_path=eval_dataset["source_text"],
-                              # val_labels_langs=eval_dataset["source_lang"],
-                              val_texts_or_path=[],
-                              val_texts_langs=[],
-                              val_labels_or_path=[],
-                              val_labels_langs=[],
+                              val_texts_or_path=eval_dataset["target_text"],
+                              val_texts_langs=eval_dataset["target_lang"],
+                              val_labels_or_path=eval_dataset["source_text"],
+                              val_labels_langs=eval_dataset["source_lang"],
+
                               # source_lang_id="en", target_lang_id="cs"
                               objective_id="X->%s" % args.src_lang
                               )
