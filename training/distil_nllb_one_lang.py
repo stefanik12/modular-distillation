@@ -33,7 +33,7 @@ parser.add_argument("--reset_weights", help="Whether to reset the base model's w
 parser.add_argument("--src_lang", help="Source and target lang for one-to-many and many-to-one distillation")
 parser.add_argument("--add_hidden_states_loss", help="Whether to distill also based on hidden states", default="True")
 parser.add_argument("--restrict_loss_to_mask", help="Whether to compute loss only from attended tokens, default",
-                    default=4)
+                    default="True")
 parser.add_argument("--tgt_langs", help="Coma-separated list of target languages. E.g: "
                                         "`sgn,tah`. Defaults to all the NLLB's target languages.", default="")
 # parser.add_argument("--pair_evaluation_langs", help="Language pairs on which to perform pair evaluations"
