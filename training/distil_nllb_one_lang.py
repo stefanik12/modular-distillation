@@ -150,7 +150,7 @@ for subset in src_tgtlang_tatoeba_splits:
         eval_dataset = eval_dataset.filter(lambda row: not (any(l_fl in row["source_lang"] for l_fl in tgt_lang_fl)
                                                             or any(l_fl in row["target_lang"] for l_fl in tgt_lang_fl)))
     if len(tgt_lang_fl) != 1:
-        print("No matching source lang found for %s. Skipping." % tatoeba_lang)
+        print("No matching source lang found for %s. Skipping." % tgt_lang_tatoeba)
         continue
 
     # consistent ordering of languages to allow quick column-wise access:
