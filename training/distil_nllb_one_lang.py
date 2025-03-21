@@ -294,7 +294,7 @@ if missing_langs:
     raise ValueError("These langs are missing from the model vocab: %s" % missing_langs)
 
 training_arguments = AdaptationArguments(output_dir=args.checkpoint_dir,
-                                         stopping_strategy=StoppingStrategy.FIRST_OBJECTIVE_CONVERGED,
+                                         stopping_strategy=StoppingStrategy.ALL_OBJECTIVES_CONVERGED,
                                          do_train=True,
                                          do_eval=True,
                                          gradient_accumulation_steps=args.effective_batch_size // args.batch_size,
