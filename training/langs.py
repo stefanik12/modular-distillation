@@ -137,3 +137,9 @@ def get_intersecting_target_langs(tatoeba_target_langs: List[str]) -> Tuple[List
                                                                      for tatoeba_l in matching_tatoeba_langs)]
     # TODO: resolve mismatching number of langs in a full collection (37 vs 38 langs)
     return covered_flores_langs, matching_tatoeba_langs
+
+
+def match_flores_langs(tatoeba_lang: str) -> List[str]:
+    matching_langs = [lang for lang in flores200_langs if lang.startswith(tatoeba_lang)]
+
+    return matching_langs

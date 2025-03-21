@@ -11,7 +11,7 @@ from transformers import PreTrainedModel, AutoModelForSeq2SeqLM, AutoConfig, M2M
 
 import wandb
 from training.distilled_seq2seq import DistilledNLLB
-from training.langs import flores200_langs, drop_locale, get_intersecting_target_langs
+from training.langs import flores200_langs, drop_locale, get_intersecting_target_langs, match_flores_langs
 import random
 
 torch.manual_seed(4321)
@@ -32,7 +32,8 @@ parser.add_argument("--reset_weights", help="Whether to reset the base model's w
                     type=bool, default=False)
 parser.add_argument("--src_lang", help="Source and target lang for one-to-many and many-to-one distillation")
 parser.add_argument("--add_hidden_states_loss", help="Whether to distill also based on hidden states", default="True")
-parser.add_argument("--restrict_loss_to_mask", help="Whether to compute loss only from attended tokens, default", default="True")
+parser.add_argument("--restrict_loss_to_mask", help="Whether to compute loss only from attended tokens, default",
+                    default=4)
 parser.add_argument("--tgt_langs", help="Coma-separated list of target languages. E.g: "
                                         "`sgn,tah`. Defaults to all the NLLB's target languages.", default="")
 # parser.add_argument("--pair_evaluation_langs", help="Language pairs on which to perform pair evaluations"
@@ -40,6 +41,7 @@ parser.add_argument("--tgt_langs", help="Coma-separated list of target languages
 parser.add_argument("--eval_batches", default=20, type=int)
 parser.add_argument("--eval_steps", default=500, type=int)
 parser.add_argument("--batch_size", default=2, type=int)
+parser.add_argument("--train_data_buffer_ratio", default=4, type=int)
 parser.add_argument("--effective_batch_size", default=32, type=int)
 parser.add_argument("--train_firstn", default=0, type=int)
 parser.add_argument("--save_steps", default=500, type=int)
@@ -102,7 +104,7 @@ for tgt_lang_fl in tgt_langs_fl:
         # skip the training for the identical language
         continue
 
-    # tgt_langs_fl.append(tgt_lang_fl)
+    # TODO: maybe perform the same filtering as with train dataset?
 
     new_dataset = load_dataset("Muennighoff/flores200", "%s-%s" % (src_lang_fl, tgt_lang_fl),
                                split="dev", trust_remote_code=True)
@@ -137,39 +139,38 @@ for subset in src_tgtlang_tatoeba_splits:
         print("Subset %s does not contain train split; skipping." % subset)
         continue
 
-    # consistent ordering of languages to allow quick column-wise access:
-    new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: row if row["source_lang"] == src_lang_tatoeba else
-    {"source_text": row["target_text"],
-     "target_text": row["source_text"],
-     "source_lang": row["target_lang"],
-     "target_lang": row["source_lang"]})
     # NLLB-specific adjustment: lang codes match the Flores collection
     # assuming that the whole dataset subset contains consistent lang pair
     tgt_lang_tatoeba = subset.replace(src_lang_tatoeba, "").replace("-", "")
-    tgt_lang_fl = [lang for lang in flores200_langs if lang.startswith(tgt_lang_tatoeba)]
-    if not len(tgt_lang_fl) == 1:
+    tgt_lang_fl = match_flores_langs(tgt_lang_tatoeba)
+    if len(tgt_lang_fl) > 1:
         print("Ambiguous tgt lang resolution for %s. Skipping and dropping %s from eval datasets."
               % (tgt_lang_tatoeba, tgt_lang_fl))
+
         eval_dataset = eval_dataset.filter(lambda row: not (any(l_fl in row["source_lang"] for l_fl in tgt_lang_fl)
                                                             or any(l_fl in row["target_lang"] for l_fl in tgt_lang_fl)))
-        continue
-    elif len(tgt_lang_fl) < 1:
-        print("No matching source lang found for %s. Skipping." % tgt_lang_tatoeba)
+    if len(tgt_lang_fl) != 1:
+        print("No matching source lang found for %s. Skipping." % tatoeba_lang)
         continue
 
-    tgt_lang_fl = tgt_lang_fl[0]
+    # consistent ordering of languages to allow quick column-wise access:
+    new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: row if row["source_lang"] == src_lang_tatoeba
+                                                              else {"source_text": row["target_text"],
+                                                                    "target_text": row["source_text"],
+                                                                    "source_lang": row["target_lang"],
+                                                                    "target_lang": row["source_lang"]})
 
+    target_langs.append(tgt_lang_fl[0])
     new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {"source_lang": src_lang_fl,
-                                                               "target_lang": tgt_lang_fl})
+                                                               "target_lang": match_flores_langs(row["target_lang"])[0]})
 
     train_dataset_length += new_tatoeba_dataset._info.splits["train"].num_examples
     all_train_datasets.append(new_tatoeba_dataset)
-    target_langs.append(tgt_lang_fl)
 
 print("Target training langs: %s" % target_langs)
 
-train_dataset_fwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=1000)
-train_dataset_bwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=1000)
+train_dataset_fwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=train_dataset_length//args.train_data_buffer_ratio)
+train_dataset_bwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=train_dataset_length//args.train_data_buffer_ratio)
 
 
 def col_iterator_from_dataset(dataset: IterableDataset, column: str) -> Iterator[str]:
@@ -189,6 +190,7 @@ train_iters = {
     "fwd": dict(zip(iters_keys, all_iterators_from_dataset(train_dataset_fwd, iters_keys))),
     "bwd": dict(zip(iters_keys, all_iterators_from_dataset(train_dataset_bwd, iters_keys)))
 }
+
 
 # train_src_iter_fwd, train_tgt_iter_fwd, train_tgt_lang_iter_fwd = all_iterators_from_dataset(train_dataset_fwd)
 # train_src_iter_bwd, train_tgt_iter_bwd, train_src_lang_iter_bwd = all_iterators_from_dataset(train_dataset_bwd)
@@ -256,10 +258,14 @@ fwd_objective = DistilledNLLB(lang_module=lang_module,
                               labels_langs=train_iters["fwd"]["target_lang"],
                               train_dataset_length=train_dataset_length,
 
-                              val_texts_or_path=eval_dataset["source_text"],
-                              val_texts_langs=eval_dataset["source_lang"],
-                              val_labels_or_path=eval_dataset["target_text"],
-                              val_labels_langs=eval_dataset["target_lang"],
+                              # val_texts_or_path=eval_dataset["source_text"],
+                              # val_texts_langs=eval_dataset["source_lang"],
+                              # val_labels_or_path=eval_dataset["target_text"],
+                              # val_labels_langs=eval_dataset["target_lang"],
+                              val_texts_or_path=[],
+                              val_texts_langs=[],
+                              val_labels_or_path=[],
+                              val_labels_langs=[],
                               # source_lang_id="en", target_lang_id="cs"
                               objective_id="%s->X" % args.src_lang
                               )
@@ -276,10 +282,14 @@ bwd_objective = DistilledNLLB(lang_module,
                               labels_langs=train_iters["fwd"]["target_lang"],
                               train_dataset_length=train_dataset_length,
 
-                              val_texts_or_path=eval_dataset["target_text"],
-                              val_texts_langs=eval_dataset["target_lang"],
-                              val_labels_or_path=eval_dataset["source_text"],
-                              val_labels_langs=eval_dataset["source_lang"],
+                              # val_texts_or_path=eval_dataset["target_text"],
+                              # val_texts_langs=eval_dataset["target_lang"],
+                              # val_labels_or_path=eval_dataset["source_text"],
+                              # val_labels_langs=eval_dataset["source_lang"],
+                              val_texts_or_path=[],
+                              val_texts_langs=[],
+                              val_labels_or_path=[],
+                              val_labels_langs=[],
                               # source_lang_id="en", target_lang_id="cs"
                               objective_id="X->%s" % args.src_lang
                               )
