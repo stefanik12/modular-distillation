@@ -69,7 +69,7 @@ if args.resume_from_checkpoint:
     # was: checkpoint_dir = args.base_model.split("/checkpoint-")[0]
 else:
     checkpoint_dir = os.path.join(args.checkpoint_dir, "checkpoints")
-    if not args.local_run and os.environ.get("LOCAL_RANK", 0) == 0 and wandb.run is not None:
+    if os.environ.get("LOCAL_RANK", 0) == 0 and wandb.run is not None:
         checkpoint_dir = checkpoint_dir + "-" + wandb.run.name
 
 print("Checkpoint will be saved to '{}'".format(checkpoint_dir))
