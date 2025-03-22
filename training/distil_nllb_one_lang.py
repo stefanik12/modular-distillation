@@ -21,7 +21,7 @@ from adaptor.adapter import Adapter
 from adaptor.schedules import ParallelSchedule
 from adaptor.utils import AdaptationArguments, StoppingStrategy
 from adaptor.evaluators.generative import BLEU
-from datasets import load_dataset, concatenate_datasets, get_dataset_config_names, IterableDataset
+from datasets import load_dataset, concatenate_datasets, get_dataset_config_names, IterableDataset, interleave_datasets
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--teacher_model", help="A pre-trained model to initialize "
@@ -116,7 +116,7 @@ for tgt_lang_fl in tgt_langs_fl:
                                                              "target_text": row["sentence_%s" % tgt_lang_fl]})
     all_eval_splits.append(new_dataset_subset)
 
-eval_dataset = concatenate_datasets(all_eval_splits)  # contains 'src_text' and 'tgt_text' columns to use for eval
+eval_dataset = interleave_datasets(all_eval_splits)  # contains 'src_text' and 'tgt_text' columns to use for eval
 
 # 1.2 Tatoeba Training dataset resolution
 
@@ -169,8 +169,8 @@ for subset in src_tgtlang_tatoeba_splits:
 
 print("Target training langs: %s" % target_langs)
 
-train_dataset_fwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=train_dataset_length//args.train_data_buffer_ratio)
-train_dataset_bwd = concatenate_datasets(all_train_datasets).shuffle(seed=42, buffer_size=train_dataset_length//args.train_data_buffer_ratio)
+train_dataset_fwd = interleave_datasets(all_train_datasets).shuffle(seed=42, buffer_size=train_dataset_length//args.train_data_buffer_ratio)
+train_dataset_bwd = interleave_datasets(all_train_datasets).shuffle(seed=42, buffer_size=train_dataset_length//args.train_data_buffer_ratio)
 
 
 def col_iterator_from_dataset(dataset: IterableDataset, column: str) -> Iterator[str]:
