@@ -44,7 +44,7 @@ parser.add_argument("--batch_size", default=2, type=int)
 parser.add_argument("--train_data_buffer_ratio", default=4, type=int)
 parser.add_argument("--effective_batch_size", default=32, type=int)
 parser.add_argument("--train_firstn", default=0, type=int)
-parser.add_argument("--save_steps", default=500, type=int)
+parser.add_argument("--save_steps", default=10000, type=int)
 parser.add_argument("--layers_reduction_ratio", default=12, type=int)  # TODO: check this in Distillation
 parser.add_argument("--resume_from_checkpoint", help="Whether this is a continued training."
                                                      "Defaults to False", default="False", type=str)
