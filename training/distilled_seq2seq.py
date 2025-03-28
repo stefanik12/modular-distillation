@@ -45,7 +45,7 @@ class DistilledNLLB(DistilledSeq2Seq):
 
     def _get_teacher_ids(self, teacher_inputs: BatchEncoding) -> torch.LongTensor:
         with torch.no_grad():
-            teacher_outputs = self.teacher_model.generate(**teacher_inputs,
+            teacher_outputs = self.teacher_model.generate(**teacher_inputs.to(self.teacher_model.device),
                                                           max_length=len(teacher_inputs['input_ids'][0]))
         if (teacher_inputs["labels"] < 0).any():
             ignore_loss_id = teacher_inputs["labels"][teacher_inputs["labels"] < 0][0]
