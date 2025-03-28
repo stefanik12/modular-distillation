@@ -19,12 +19,14 @@ class DistilledNLLB(DistilledSeq2Seq):
                  labels_langs: Iterable[str],
                  val_texts_langs: Iterable[str],
                  val_labels_langs: Iterable[str],
+                 use_teacher_targets: bool = False,
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.texts_langs = texts_langs
         self.labels_langs = labels_langs
         self.val_texts_langs = val_texts_langs
         self.val_labels_langs = val_labels_langs
+        self.use_teacher_targets = use_teacher_targets
 
     def _get_inputs_iterator(self, split: str) -> Iterator[Union[BatchEncoding, Dict[str, torch.Tensor]]]:
         # TODO: zip the output iterator with the definition of input and output languages
@@ -40,6 +42,18 @@ class DistilledNLLB(DistilledSeq2Seq):
         collated_iter = self._get_seq2seq_collated_iterator(source_texts_iter, target_texts_iter, src_langs, tgt_langs)
 
         return collated_iter
+
+    def _get_teacher_ids(self, teacher_inputs: BatchEncoding) -> torch.LongTensor:
+        with torch.no_grad():
+            teacher_outputs = self.teacher_model.generate(**teacher_inputs,
+                                                          max_length=len(teacher_inputs['input_ids'][0]))
+        if (teacher_inputs["labels"] < 0).any():
+            ignore_loss_id = teacher_inputs["labels"][teacher_inputs["labels"] < 0][0]
+            # excluding labels from the loss -> this should be pertained
+            for batch_i in range(len(teacher_outputs)):
+                sample_eos_pos = torch.where(teacher_outputs[batch_i] == self.tokenizer.eos_token_id)[0].max()
+                teacher_outputs[batch_i, sample_eos_pos+1:] = ignore_loss_id
+        return teacher_outputs
 
     def _get_seq2seq_collated_iterator(self,
                                        source_texts: Iterable[str],
@@ -68,12 +82,16 @@ class DistilledNLLB(DistilledSeq2Seq):
                                    "attention_mask": sample_features.attention_mask,
                                    "labels": sample_targets.input_ids})
             if len(features_batch) == self.batch_size:
-                yield self.collator(features_batch)
+                out_batch = self.collator(features_batch)
+                out_batch["labels"] = self._get_teacher_ids(out_batch)
+                yield out_batch
                 features_batch = []
 
         if features_batch:
             # yield last nonempty residual batch
-            yield self.collator(features_batch)
+            out_batch = self.collator(features_batch)
+            out_batch["labels"] = self._get_teacher_ids(out_batch)
+            yield out_batch
 
     def register_compatible_head_model(self, lang_module: LangModule,
                                        other_objective: Optional["Objective"] = None,

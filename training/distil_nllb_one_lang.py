@@ -26,6 +26,9 @@ from datasets import load_dataset, concatenate_datasets, get_dataset_config_name
 parser = argparse.ArgumentParser()
 parser.add_argument("--teacher_model", help="A pre-trained model to initialize "
                                             "the training with", required=True, type=str)
+parser.add_argument("--use_teacher_targets", help="Whether to use teacher's predictions as targets", default=False)
+parser.add_argument("--construct_new_student", help="Whether to reinitialize a new student model"
+                                                    "based on the teacher", type=str, default="True")
 parser.add_argument("--checkpoint_dir", help="A base folder where to store the training checkpoints."
                                              "Ignored in continued training.", type=str, default=".")
 parser.add_argument("--reset_weights", help="Whether to reset the base model's weights",
@@ -51,6 +54,8 @@ parser.add_argument("--resume_from_checkpoint", help="Whether this is a continue
 parser.add_argument("--learning_rate", help="Learning rate used with all objectives. Defaults to `2e-5`.",
                     default=2e-5, type=float)
 args = parser.parse_args()
+args.use_teacher_targets = args.use_teacher_targets.lower() != "false"
+args.construct_new_student = args.construct_new_student.lower() != "false"
 args.resume_from_checkpoint = args.resume_from_checkpoint.lower() != "false"
 args.add_hidden_states_loss = args.add_hidden_states_loss.lower() != "false"
 args.restrict_loss_to_mask = args.restrict_loss_to_mask.lower() != "false"
@@ -231,18 +236,21 @@ def construct_student_from_teacher(teacher_model: PreTrainedModel,
 
 
 teacher_model = AutoModelForSeq2SeqLM.from_pretrained(args.teacher_model)
-student_model = construct_student_from_teacher(teacher_model,
-                                               args.teacher_model,
-                                               M2M100ForConditionalGeneration,
-                                               args.reset_weights)
-INIT_MODEL_PATH = os.path.join(args.checkpoint_dir, "init_student_model")
+# teacher_model = AutoModelForSeq2SeqLM.from_pretrained("init_student_model")  # TODO: debugging only
 
-student_model.save_pretrained(INIT_MODEL_PATH)
-AutoTokenizer.from_pretrained(args.teacher_model).save_pretrained(INIT_MODEL_PATH)
+STUDENT_MODEL_PATH = os.path.join(args.checkpoint_dir, "init_student_model")
+
+if args.construct_new_student:
+    student_model = construct_student_from_teacher(teacher_model,
+                                                   args.teacher_model,
+                                                   M2M100ForConditionalGeneration,
+                                                   args.reset_weights)
+    student_model.save_pretrained(STUDENT_MODEL_PATH)
+    AutoTokenizer.from_pretrained(args.teacher_model).save_pretrained(STUDENT_MODEL_PATH)
 
 # 3. Initialize two objectives: 1. forward with data: {lang}-{others}, 2. backward with data: {others}-{lang}
 #   the data can be constructed in advance by concatenating all relevant subsets of HF Opus-100 dataset
-lang_module = LangModule(INIT_MODEL_PATH)
+lang_module = LangModule(STUDENT_MODEL_PATH)
 evaluators = [BLEU()]
 
 fwd_objective = DistilledNLLB(lang_module=lang_module,
@@ -251,6 +259,7 @@ fwd_objective = DistilledNLLB(lang_module=lang_module,
                               val_evaluators=evaluators,
                               add_hidden_states_loss=args.add_hidden_states_loss,
                               restrict_loss_to_mask=args.restrict_loss_to_mask,
+                              use_teacher_targets=args.use_teacher_targets,
 
                               texts_or_path=train_iters["fwd"]["source_text"],
                               texts_langs=train_iters["fwd"]["source_lang"],
@@ -272,6 +281,7 @@ bwd_objective = DistilledNLLB(lang_module,
                               val_evaluators=evaluators,
                               add_hidden_states_loss=args.add_hidden_states_loss,
                               restrict_loss_to_mask=args.restrict_loss_to_mask,
+                              use_teacher_targets=args.use_teacher_targets,
 
                               texts_or_path=train_iters["fwd"]["source_text"],
                               texts_langs=train_iters["fwd"]["source_lang"],
