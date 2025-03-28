@@ -26,7 +26,7 @@ from datasets import load_dataset, concatenate_datasets, get_dataset_config_name
 parser = argparse.ArgumentParser()
 parser.add_argument("--teacher_model", help="A pre-trained model to initialize "
                                             "the training with", required=True, type=str)
-parser.add_argument("--use_teacher_targets", help="Whether to use teacher's predictions as targets", default=False)
+parser.add_argument("--use_teacher_targets", help="Whether to use teacher's predictions as targets", default="False")
 parser.add_argument("--construct_new_student", help="Whether to reinitialize a new student model"
                                                     "based on the teacher", type=str, default="True")
 parser.add_argument("--checkpoint_dir", help="A base folder where to store the training checkpoints."
