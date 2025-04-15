@@ -14,6 +14,8 @@ from training.distilled_seq2seq import DistilledNLLB
 from training.langs import flores200_langs, drop_locale, get_intersecting_target_langs, match_flores_langs
 import random
 
+from training.teacher_utils import CachedTeacherTranslator
+
 torch.manual_seed(4321)
 random.seed(4321)
 
@@ -27,6 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--teacher_model", help="A pre-trained model to initialize "
                                             "the training with", required=True, type=str)
 parser.add_argument("--use_teacher_targets", help="Whether to use teacher's predictions as targets", default="False")
+parser.add_argument("--teacher_targets_batch_size", help="Batch size for inference with teacher", type=int, default=32)
 parser.add_argument("--construct_new_student", help="Whether to reinitialize a new student model"
                                                     "based on the teacher", type=str, default="True")
 parser.add_argument("--checkpoint_dir", help="A base folder where to store the training checkpoints."
@@ -78,6 +81,15 @@ else:
         checkpoint_dir = checkpoint_dir + "-" + wandb.run.name
 
 print("Checkpoint will be saved to '{}'".format(checkpoint_dir))
+
+# 0. Initialize teacher
+teacher_model = AutoModelForSeq2SeqLM.from_pretrained(args.teacher_model)
+teacher_tokenizer = AutoTokenizer.from_pretrained(args.teacher_model)
+
+if args.use_teacher_targets:
+    teacher_wrapper = CachedTeacherTranslator(teacher_model, teacher_tokenizer, args.checkpoint_dir)
+else:
+    teacher_wrapper = None
 
 # 1. Initialize data: evaluation (flores for given lang), training (opus for given lang)
 # Languages resolution
@@ -180,8 +192,19 @@ train_dataset_bwd = interleave_datasets(all_train_datasets).shuffle(seed=42, buf
 
 def col_iterator_from_dataset(dataset: IterableDataset, column: str) -> Iterator[str]:
     dataset_iter = iter(dataset)
-    for sample in dataset_iter:
-        yield sample[column]
+    if args.use_teacher_targets and column == "target_text":
+        # pre-constructing targets with a teacher
+        source_texts_batch = []
+        for sample in dataset_iter:
+            source_texts_batch.append(sample["source_text"])
+            if len(source_texts_batch) >= args.teacher_targets_batch_size:
+                teacher_outputs = teacher_wrapper.get(source_texts_batch)
+                for output in teacher_outputs:
+                    yield output
+                source_texts_batch = []
+    else:
+        for sample in dataset_iter:
+            yield sample[column]
 
 
 def all_iterators_from_dataset(dataset: IterableDataset, keys: List[str]) -> List[Iterator[str]]:
@@ -235,9 +258,6 @@ def construct_student_from_teacher(teacher_model: PreTrainedModel,
     return student_model
 
 
-teacher_model = AutoModelForSeq2SeqLM.from_pretrained(args.teacher_model)
-# teacher_model = AutoModelForSeq2SeqLM.from_pretrained("init_student_model")  # TODO: debugging only
-
 STUDENT_MODEL_PATH = os.path.join(args.checkpoint_dir, "init_student_model")
 
 if args.construct_new_student:
@@ -259,7 +279,7 @@ fwd_objective = DistilledNLLB(lang_module=lang_module,
                               val_evaluators=evaluators,
                               add_hidden_states_loss=args.add_hidden_states_loss,
                               restrict_loss_to_mask=args.restrict_loss_to_mask,
-                              use_teacher_targets=args.use_teacher_targets,
+                              # use_teacher_targets=args.use_teacher_targets,
 
                               texts_or_path=train_iters["fwd"]["source_text"],
                               texts_langs=train_iters["fwd"]["source_lang"],
@@ -281,7 +301,7 @@ bwd_objective = DistilledNLLB(lang_module,
                               val_evaluators=evaluators,
                               add_hidden_states_loss=args.add_hidden_states_loss,
                               restrict_loss_to_mask=args.restrict_loss_to_mask,
-                              use_teacher_targets=args.use_teacher_targets,
+                              # use_teacher_targets=args.use_teacher_targets,
 
                               texts_or_path=train_iters["fwd"]["source_text"],
                               texts_langs=train_iters["fwd"]["source_lang"],

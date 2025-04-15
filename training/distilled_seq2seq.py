@@ -19,14 +19,14 @@ class DistilledNLLB(DistilledSeq2Seq):
                  labels_langs: Iterable[str],
                  val_texts_langs: Iterable[str],
                  val_labels_langs: Iterable[str],
-                 use_teacher_targets: bool = False,
+                 # use_teacher_targets: bool = False,  # on-the-fly generation not supported for now
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.texts_langs = texts_langs
         self.labels_langs = labels_langs
         self.val_texts_langs = val_texts_langs
         self.val_labels_langs = val_labels_langs
-        self.use_teacher_targets = use_teacher_targets
+        self.use_teacher_targets = False
 
     def _get_inputs_iterator(self, split: str) -> Iterator[Union[BatchEncoding, Dict[str, torch.Tensor]]]:
         # TODO: zip the output iterator with the definition of input and output languages
@@ -83,14 +83,16 @@ class DistilledNLLB(DistilledSeq2Seq):
                                    "labels": sample_targets.input_ids})
             if len(features_batch) == self.batch_size:
                 out_batch = self.collator(features_batch)
-                out_batch["labels"] = self._get_teacher_ids(out_batch)
+                if self.use_teacher_targets:
+                    out_batch["labels"] = self._get_teacher_ids(out_batch)
                 yield out_batch
                 features_batch = []
 
         if features_batch:
             # yield last nonempty residual batch
             out_batch = self.collator(features_batch)
-            out_batch["labels"] = self._get_teacher_ids(out_batch)
+            if self.use_teacher_targets:
+                out_batch["labels"] = self._get_teacher_ids(out_batch)
             yield out_batch
 
     def register_compatible_head_model(self, lang_module: LangModule,

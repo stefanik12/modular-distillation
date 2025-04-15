@@ -44,8 +44,6 @@ def read_rows(dir: str, split: str) -> Tuple[List[str], List[str]]:
     if os.path.exists(path+".src"):
         with open(path+".src") as src_f:
             with open(path+".trg") as trg_f:
-                # TODO: convert to stream in cases exceeding file size of cs-de (sucessfully processed on 512GB RAM):
-                #  -rw-rw-r-- 1 tiedeman project_462000447 3,1G okt  1  2023 train.src.gz
                 return [s.strip() for s in src_f.readlines()], [s.strip() for s in trg_f.readlines()]
 
     elif os.path.exists(path+".src.gz"):
