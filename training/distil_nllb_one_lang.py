@@ -64,12 +64,15 @@ args.add_hidden_states_loss = args.add_hidden_states_loss.lower() != "false"
 args.restrict_loss_to_mask = args.restrict_loss_to_mask.lower() != "false"
 # args.eval_run = args.eval_run.lower() != "false"
 
+USE_CUDA = True if (args.train_firstn and args.train_firstn < 10e4) else False
+
 wandb.init(project="modular-distillation")
 wandb.log({"slurm_id": os.environ.get("SLURM_JOB_ID", -1)}, commit=False)
 
 print("Running with arguments: %s" % args)
 print("Training World size: %s" % int(os.environ.get("WORLD_SIZE", 1)))
 print("CUDA.is_available(): %s" % torch.cuda.is_available())
+print("USE_CUDA: %s" % USE_CUDA)
 
 if args.resume_from_checkpoint:
     # remove the checkpoint-X part of path
@@ -84,6 +87,8 @@ print("Checkpoint will be saved to '{}'".format(checkpoint_dir))
 
 # 0. Initialize teacher
 teacher_model = AutoModelForSeq2SeqLM.from_pretrained(args.teacher_model)
+if USE_CUDA:
+    teacher_model = teacher_model.to("cuda")
 teacher_tokenizer = AutoTokenizer.from_pretrained(args.teacher_model)
 
 if args.use_teacher_targets:
@@ -334,7 +339,7 @@ training_arguments = AdaptationArguments(output_dir=args.checkpoint_dir,
                                          eval_steps=args.eval_steps,
                                          num_train_epochs=10,
                                          save_steps=args.save_steps,
-                                         no_cuda=True if (args.train_firstn and args.train_firstn < 10e4) else False,
+                                         no_cuda=not USE_CUDA,
                                          )
 
 schedule = ParallelSchedule(train_objectives, training_arguments)

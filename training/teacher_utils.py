@@ -21,7 +21,7 @@ class CachedTeacherTranslator:
         try:
             return [self.cache[input_str] for input_str in input_strs]
         except KeyError:
-            inputs = self.tokenizer(input_strs, return_tensors="pt", truncation=True, padding=True)
+            inputs = self.tokenizer(input_strs, return_tensors="pt", truncation=True, padding=True).to(self.device)
             outputs = self.model.generate(**inputs)
             output_strs = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
             for input_str, output_str in zip(input_strs, output_strs):
