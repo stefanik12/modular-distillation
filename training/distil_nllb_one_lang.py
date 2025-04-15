@@ -64,7 +64,7 @@ args.add_hidden_states_loss = args.add_hidden_states_loss.lower() != "false"
 args.restrict_loss_to_mask = args.restrict_loss_to_mask.lower() != "false"
 # args.eval_run = args.eval_run.lower() != "false"
 
-USE_CUDA = True if (args.train_firstn and args.train_firstn < 10e4) else False
+USE_CUDA = False if (args.train_firstn and args.train_firstn < 10e4) else True  # No cuda if running with subset of data
 
 wandb.init(project="modular-distillation")
 wandb.log({"slurm_id": os.environ.get("SLURM_JOB_ID", -1)}, commit=False)
