@@ -11,7 +11,7 @@ class CachedTeacherTranslator:
         self.model = teacher_model
         self.tokenizer = teacher_tokenizer
         self.device = self.model.device
-        cache_file = f"{self.model.config.name_or_path}.tsv"
+        cache_file = f"{self.model.config.name_or_path.replace( '/', '-')}.tsv"
         cache_dir = os.path.join(cache_dir, cache_file)
 
         self.cache_writer = open(cache_dir, "a")
