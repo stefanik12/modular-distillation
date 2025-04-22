@@ -15,7 +15,7 @@ class CachedTeacherTranslator:
         cache_dir = os.path.join(cache_dir, cache_file)
 
         self.cache_writer = open(cache_dir, "a")
-        self.cache = pd.read_csv(cache_dir, sep="\t", names=["a", "b"], error_bad_lines=False, on_bad_lines="warn",
+        self.cache = pd.read_csv(cache_dir, sep="\t", names=["a", "b"], on_bad_lines="warn",
                                  ).set_index("a", drop=True)["b"].drop_duplicates().to_dict()
 
     def get(self, input_strs: List[str]) -> List[str]:
