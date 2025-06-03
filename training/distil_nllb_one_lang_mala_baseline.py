@@ -146,7 +146,7 @@ eval_dataset = interleave_datasets(all_eval_splits)  # contains 'src_text' and '
 
 # debug:
 # all_splits = ["bre-ces"]
-train_dataset_length = 100_000
+train_dataset_length = 10_000_000
 
 train_dataset_fwd = train_dataset.shuffle(seed=42, buffer_size=train_dataset_length//args.train_data_buffer_ratio)
 train_dataset_bwd = train_dataset.shuffle(seed=42, buffer_size=train_dataset_length//args.train_data_buffer_ratio)
