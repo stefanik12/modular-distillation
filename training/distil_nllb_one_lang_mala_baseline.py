@@ -105,11 +105,9 @@ src_lang_fl = [lang for lang in flores200_langs if lang.startswith(args.src_lang
 assert len(src_lang_fl) == 1, "Ambiguous src lang resolution for %s" % args.src_lang
 src_lang_fl = src_lang_fl[0]
 
-src_lang_tatoeba = drop_locale(src_lang_fl)
-
 train_dataset = load_dataset("MaLA-LM/mala-bilingual-translation-corpus", split="train", streaming=True)
-# train_dataset = load_dataset("MaLA-LM/mala-bilingual-translation-corpus", split="train[:100]")
-# train_dataset = train_dataset[:1000]
+train_dataset = train_dataset.filter(lambda row: row["src_lang"] == src_lang_fl)
+
 if args.tgt_langs:
     train_dataset = train_dataset.filter(lambda row: row["tgt_lang"] in args.tgt_langs)
 
