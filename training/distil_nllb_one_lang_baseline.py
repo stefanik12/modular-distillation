@@ -34,14 +34,14 @@ parser.add_argument("--construct_new_student", help="Whether to reinitialize a n
                                                     "based on the teacher", type=str, default="True")
 parser.add_argument("--checkpoint_dir", help="A base folder where to store the training checkpoints."
                                              "Ignored in continued training.", type=str, default=".")
-parser.add_argument("--reset_weights", help="Whether to reset the base model's weights",
-                    type=bool, default=False)
-parser.add_argument("--src_lang", help="Source and target lang for one-to-many and many-to-one distillation")
+parser.add_argument("--reset_weights", help="Whether to reset the base model's weights", type=bool, default=False)
 parser.add_argument("--add_hidden_states_loss", help="Whether to distill also based on hidden states", default="True")
-parser.add_argument("--restrict_loss_to_mask", help="Whether to compute loss only from attended tokens, default",
-                    default="True")
+parser.add_argument("--restrict_loss_to_mask", help="Whether to compute loss only from attended tokens, default", default="True")
+parser.add_argument("--src_lang", help="Source and target lang for one-to-many and many-to-one distillation")
 parser.add_argument("--tgt_langs", help="Coma-separated list of target languages. E.g: "
                                         "`sgn,tah`. Defaults to all the NLLB's target languages.", default="")
+parser.add_argument("--alignment_scores_paths", help="Paths to text files with quality scores for translation pairs", default="None")
+parser.add_argument("--alignment_scores_threshold", help="Threshold for filtering out low-quality input pairs", default=0.9)
 # parser.add_argument("--pair_evaluation_langs", help="Language pairs on which to perform pair evaluations"
 #                                                     "(GradientDotProduct eval). Format: 'fur,tah;epo,est'", default="")
 parser.add_argument("--eval_batches", default=20, type=int)
@@ -62,6 +62,7 @@ args.construct_new_student = args.construct_new_student.lower() != "false"
 args.resume_from_checkpoint = args.resume_from_checkpoint.lower() != "false"
 args.add_hidden_states_loss = args.add_hidden_states_loss.lower() != "false"
 args.restrict_loss_to_mask = args.restrict_loss_to_mask.lower() != "false"
+args.alignment_scores_paths = args.alignment_scores_paths.split(",") if args.alignment_scores_paths != "None" else None
 # args.eval_run = args.eval_run.lower() != "false"
 
 USE_CUDA = False if (args.train_firstn and args.train_firstn < 10e4) else True  # No cuda if running with subset of data
@@ -151,7 +152,12 @@ train_dataset_length = 0
 target_langs = []
 
 src_tgtlang_tatoeba_splits = [s for s in srclang_tatoeba_splits if any(tgt_l in s for tgt_l in tgt_langs_tatoeba)]
-for subset in src_tgtlang_tatoeba_splits:
+if args.alignment_scores_paths is None:
+    args.alignment_scores_paths = [None for _ in src_tgtlang_tatoeba_splits]
+else:
+    assert len(args.alignment_scores_paths) == len(src_tgtlang_tatoeba_splits)
+
+for subset, alignment_fpath in zip(src_tgtlang_tatoeba_splits, args.alignment_scores_paths):
     # split_with_subset = "train" if not args.train_firstn else "train[:%s]" % args.train_firstn
     split_with_subset = "train"
     try:
@@ -181,6 +187,14 @@ for subset in src_tgtlang_tatoeba_splits:
                                                                     "target_text": row["source_text"],
                                                                     "source_lang": row["target_lang"],
                                                                     "target_lang": row["source_lang"]})
+    if alignment_fpath is not None:
+        with open(alignment_fpath) as scores_f:
+            alignments = [float(row) for row in scores_f]
+
+        new_tatoeba_dataset["alignment_scores"] = alignments
+        print("Filtering training data for %s down to %s samples" % (subset, sum(a >= args.alignment_scores_threshold for a in alignments)))
+        new_tatoeba_dataset = new_tatoeba_dataset.filter(lambda row: row["alignment_scores"] >= args.alignment_scores_threshold)
+        exit()
 
     target_langs.append(tgt_lang_fl[0])
     new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {"source_lang": src_lang_fl,
