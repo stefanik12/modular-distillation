@@ -195,7 +195,6 @@ for subset, alignment_fpath in zip(src_tgtlang_tatoeba_splits, args.alignment_sc
         new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {**row.items(), "alignment_scores": next(alignments_iter)})
         print("Filtering training data for %s down to %s samples" % (subset, sum(a >= args.alignment_scores_threshold for a in alignments)))
         new_tatoeba_dataset = new_tatoeba_dataset.filter(lambda row: row["alignment_scores"] >= args.alignment_scores_threshold)
-        exit()
 
     target_langs.append(tgt_lang_fl[0])
     new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {"source_lang": src_lang_fl,
