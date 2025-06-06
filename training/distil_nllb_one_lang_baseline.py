@@ -41,7 +41,7 @@ parser.add_argument("--src_lang", help="Source and target lang for one-to-many a
 parser.add_argument("--tgt_langs", help="Coma-separated list of target languages. E.g: "
                                         "`sgn,tah`. Defaults to all the NLLB's target languages.", default="")
 parser.add_argument("--alignment_scores_paths", help="Paths to text files with quality scores for translation pairs", default="None")
-parser.add_argument("--alignment_scores_threshold", help="Threshold for filtering out low-quality input pairs", default=0.9)
+parser.add_argument("--alignment_scores_threshold", help="Threshold for filtering out low-quality input pairs", default=0.95)
 # parser.add_argument("--pair_evaluation_langs", help="Language pairs on which to perform pair evaluations"
 #                                                     "(GradientDotProduct eval). Format: 'fur,tah;epo,est'", default="")
 parser.add_argument("--eval_batches", default=20, type=int)
@@ -191,7 +191,8 @@ for subset, alignment_fpath in zip(src_tgtlang_tatoeba_splits, args.alignment_sc
         with open(alignment_fpath) as scores_f:
             alignments = [float(row) for row in scores_f]
 
-        new_tatoeba_dataset["alignment_scores"] = alignments
+        alignments_iter = iter(alignments)
+        new_tatoeba_dataset = new_tatoeba_dataset.map(lambda row: {**row.items(), "alignment_scores": next(alignments_iter)})
         print("Filtering training data for %s down to %s samples" % (subset, sum(a >= args.alignment_scores_threshold for a in alignments)))
         new_tatoeba_dataset = new_tatoeba_dataset.filter(lambda row: row["alignment_scores"] >= args.alignment_scores_threshold)
         exit()
