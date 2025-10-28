@@ -1,34 +1,49 @@
+# Before starting, don't forget to run `huggingface-cli login` or add: push_to_hub(..., **`token=HF_xxx`**)
+
 import logging
 import os
 from functools import partial
 from typing import List, Tuple, Union, Iterator, Dict
 
-from datasets import DatasetDict, Dataset, Value, Features
+from datasets import DatasetDict, Dataset, Value, Features, get_dataset_config_names
 from tqdm import tqdm
 
 logger = logging.getLogger()
 
-# local:
-# TATOEBA_DATA_DIR = 'data/example_data_dir'
-# TARGET_HF_PATH = "michal-stefanik/toy_tatoeba_dataset"
+# local test:
+# TATOEBA_DATA_DIR = 'data/example_data_dir_mini'
+# TARGET_HF_PATH = "michal-stefanik/tatoeba_mt_ces-x"
 #
-# TARGET_LANG: Union[str, None] = None
-# SOURCE_LANGS: Union[str, None] = None
+# TARGET_LANG: Union[str, None] = "ces"
+# SOURCE_LANGS: Union[str, None] = "eng"
 
 # lumi:
 TATOEBA_DATA_DIR = '/scratch/project_462000447/data/Tatoeba-Challenge/v2023-09-26'
-TARGET_HF_PATH = "michal-stefanik/tatoeba_mt_ces-x"
+TARGET_HF_PATH = "Helsinki-NLP/tatoeba_mt_train"
 
-TARGET_LANG: Union[str, None] = "ces"
-SOURCE_LANGS: Union[str, None] = "eng"
+# SOUCE/TARGET_LANG get a string with coma-separated list of tatoeba lang codes,
+# or None -> using all pairs in the directory
+TARGET_LANG: Union[str, None] = None
+SOURCE_LANGS: Union[str, None] = None
 
 
 subdirs = os.listdir(TATOEBA_DATA_DIR)
 
 lang_subdirs = [sdir for sdir in subdirs if len(sdir.split("-")) == 2
                 and len(sdir.split("-")[0]) <= 3 and len(sdir.split("-")[1]) <= 3]
-
 logger.warning("Directory %s contains %s lang pairs", TATOEBA_DATA_DIR, len(lang_subdirs))
+
+# Added 29/10/25: to continue the upload without overriding, we check what is already on HF and skip that
+existing_hf_subsets = set(get_dataset_config_names(TARGET_HF_PATH))
+
+subdirs_to_be_dropped = [lp for lp in lang_subdirs if lp in existing_hf_subsets]
+logger.warning("Skipping %s subdirs already listed as subsets of %s dataset. "
+               "Remove this if you wish to override existing subsets.", len(subdirs_to_be_dropped), TARGET_HF_PATH)
+
+lang_subdirs = [lp for lp in lang_subdirs if lp not in existing_hf_subsets]
+# end 29/10/25
+
+logger.warning("Going to %s upload %s lang pairs", TATOEBA_DATA_DIR, len(lang_subdirs))
 
 if TARGET_LANG is not None:
     lang_subdirs = [l for l in lang_subdirs if TARGET_LANG in l]
@@ -63,7 +78,7 @@ def generate_entries(dir: str, split: str) -> Union[None, Iterator[Dict[str, str
     if os.path.exists(path+".src"):
         with open(path+".src") as src_f:
             with open(path+".trg") as trg_f:
-                # TODO: convert to stream in cases exceeding file size of cs-de (sucessfully processed on 512GB RAM):
+                # stream processing is necessary for cases exceeding file size of cs-de (sucessfully processed on 512GB RAM):
                 #  -rw-rw-r-- 1 tiedeman project_462000447 3,1G okt  1  2023 train.src.gz
                 for src, tgt in zip(src_f.readlines(), trg_f.readlines()):
                     yield {"source_text": src.strip(),
@@ -105,7 +120,7 @@ for subdir in tqdm(lang_subdirs, desc="Uploading langs"):
             # some of the iterated documents are empty
             continue
 
-        # explicit schema definition
+        # explicit schema definition -> necessary for stream upload
         features = Features({"source_text": Value("string"), "target_text": Value("string"),
                              "source_lang": Value("string"), "target_lang": Value("string")})
         lang_pair_dataset[split] = Dataset.from_generator(partial(generate_entries, dir=subdir_path, split=split), features=features)
